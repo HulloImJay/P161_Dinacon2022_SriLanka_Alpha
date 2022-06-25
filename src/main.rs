@@ -1,6 +1,6 @@
-mod bev;
+mod bev2;
 
 fn main() {
-    bev::start_bevy();
+    bev2::start_bevy();
 }
 
