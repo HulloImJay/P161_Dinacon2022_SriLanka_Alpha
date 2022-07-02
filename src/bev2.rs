@@ -17,6 +17,7 @@ pub fn start_bevy() {
         .add_startup_system(startup)
         .add_startup_system(make_instance)
         .add_system(spawner_system)
+        .add_system(anim_system)
         .run();
 }
 
@@ -38,7 +39,37 @@ fn make_instance(
             handle: gltf,
         },
         WaitingToSpawn {},
+        Transform {
+            translation: Default::default(),
+            rotation: Default::default(),
+            scale: Vec3::ONE,
+        },
+        GlobalTransform        {
+            translation: Default::default(),
+            rotation: Default::default(),
+            scale: Vec3::ONE
+        }
     ));
+}
+
+fn anim_system(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut animation_player: Query<&mut AnimationPlayer>,
+)
+{
+    if let Ok(mut player) = animation_player.get_single_mut() {
+        if keyboard_input.just_pressed(KeyCode::Space) {
+            if player.is_paused() {
+                player.resume();
+                println!("unpause");
+            } else {
+                player.pause();
+                println!("pause");
+            }
+        }
+        if keyboard_input.just_pressed(KeyCode::Return) {
+        }
+    }
 }
 
 fn spawner_system(
@@ -49,17 +80,23 @@ fn spawner_system(
 {
     for (entity, instance, _) in query.iter_mut() {
         if let Some(gltf) = assets_gltf.get(&instance.handle) {
-
             // Spawn it!
-            commands.spawn_bundle(TransformBundle {
-                local: Transform::from_xyz(1.0, 2.0, 3.0),
-                global: GlobalTransform::identity(),
-            }).with_children(|parent| {
-                parent.spawn_scene(gltf.scenes[0].clone());
-            });
+            let model_spawn =
+                commands.spawn_bundle(TransformBundle {
+                    local: Transform::from_xyz(1.0, 2.0, 3.0),
+                    global: GlobalTransform::identity(),
+                }).with_children(|parent| {
+                    parent.spawn_scene(gltf.scenes[0].clone());
+                }).id();
+
+            // commands.entity(entity).(|parent| {
+            //     parent.spawn_scene(gltf.scenes[0].clone());
+            // });
+            
+            commands.entity(entity).add_child(model_spawn);
 
             commands.entity(entity).remove::<WaitingToSpawn>();
-            
+
             // Curious.
             println!("Contains '{}' scenes", gltf.scenes.len());
             for scene in gltf.scenes.iter()
