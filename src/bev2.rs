@@ -18,16 +18,20 @@ pub fn start_bevy() {
         .add_startup_system(make_instance)
         .add_system(spawner_system)
         .add_system(anim_system)
+        .add_system(gltf_anim_linker)
         .run();
 }
 
 #[derive(Component)]
-struct GLTFHandle {
+struct ModelGLTF {
     handle: Handle<Gltf>,
 }
 
 #[derive(Component)]
-struct WaitingToSpawn {}
+struct ModelWaitingToSpawn {}
+
+#[derive(Component)]
+struct ModelSpawned {}
 
 fn make_instance(
     mut commands: Commands,
@@ -35,81 +39,92 @@ fn make_instance(
 ) {
     let gltf = ass.load("agouti.glb");
     commands.spawn_bundle((
-        GLTFHandle {
+        ModelGLTF {
             handle: gltf,
         },
-        WaitingToSpawn {},
+        ModelWaitingToSpawn {},
         Transform {
             translation: Default::default(),
             rotation: Default::default(),
             scale: Vec3::ONE,
         },
-        GlobalTransform        {
+        GlobalTransform {
             translation: Default::default(),
             rotation: Default::default(),
-            scale: Vec3::ONE
-        }
+            scale: Vec3::ONE,
+        },
+        Name::new("GLTF Model"),
     ));
+}
+
+#[derive(Component)]
+struct ModelGLTFLinker {}
+
+fn gltf_anim_linker(
+    mut commands: Commands,
+    q_parent: Query<&ModelGLTF>,
+    q_child: Query<(Entity, &Parent, Option<&ModelGLTFLinker>, Option<&AnimationPlayer>)>,
+)
+{
+    for i in q_child.iter() {
+        if let (entity, parent, None, anim_player) = i {
+            if let Ok(parent_entity) = q_parent.get(parent.0) {
+                commands.entity(entity).remove::<ModelGLTFLinker>();
+
+                if let None = anim_player
+                {
+                    commands.entity(entity).insert(ModelGLTF { handle: parent_entity.handle.clone() });
+                }
+            }
+        }
+    }
 }
 
 fn anim_system(
     keyboard_input: Res<Input<KeyCode>>,
-    mut animation_player: Query<&mut AnimationPlayer>,
+    q_parent: Query<&ModelGLTF>,
+    mut q_child: Query<(&Parent, &mut AnimationPlayer)>,
+    assets_gltf: Res<Assets<Gltf>>,
 )
 {
-    if let Ok(mut player) = animation_player.get_single_mut() {
-        if keyboard_input.just_pressed(KeyCode::Space) {
-            if player.is_paused() {
-                player.resume();
-                println!("unpause");
-            } else {
-                player.pause();
-                println!("pause");
+    for (parent, mut player) in q_child.iter_mut() {
+        if let Ok(model) = q_parent.get(parent.0) {
+            if let Some(gltf) = assets_gltf.get(&model.handle) {
+                if keyboard_input.just_pressed(KeyCode::Space) {
+                    if player.is_paused() {
+                        player.play(gltf.named_animations["Run"].clone_weak());
+                        // player.resume();
+                        println!("unpause");
+                    } else {
+                        player.pause();
+                        println!("pause");
+                        println!("Contains '{}' named animations", gltf.named_animations.len());
+                        for anim in gltf.named_animations.iter()
+                        {
+                            println!("Animation: '{}'", anim.0);
+                        }
+                    }
+                }
+                if keyboard_input.just_pressed(KeyCode::Return) {}
             }
-        }
-        if keyboard_input.just_pressed(KeyCode::Return) {
         }
     }
 }
 
 fn spawner_system(
     mut commands: Commands,
-    mut query: Query<(Entity, &GLTFHandle, &WaitingToSpawn)>,
+    mut query: Query<(Entity, &ModelGLTF, &ModelWaitingToSpawn)>,
     assets_gltf: Res<Assets<Gltf>>,
 )
 {
-    for (entity, instance, _) in query.iter_mut() {
-        if let Some(gltf) = assets_gltf.get(&instance.handle) {
+    for (entity, model, _) in query.iter_mut() {
+        if let Some(gltf) = assets_gltf.get(&model.handle) {
             // Spawn it!
-            let model_spawn =
-                commands.spawn_bundle(TransformBundle {
-                    local: Transform::from_xyz(1.0, 2.0, 3.0),
-                    global: GlobalTransform::identity(),
-                }).with_children(|parent| {
-                    parent.spawn_scene(gltf.scenes[0].clone());
-                }).id();
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn_scene(gltf.scenes[0].clone());
+            });
 
-            // commands.entity(entity).(|parent| {
-            //     parent.spawn_scene(gltf.scenes[0].clone());
-            // });
-            
-            commands.entity(entity).add_child(model_spawn);
-
-            commands.entity(entity).remove::<WaitingToSpawn>();
-
-            // Curious.
-            println!("Contains '{}' scenes", gltf.scenes.len());
-            for scene in gltf.scenes.iter()
-            {
-                println!("Scene ID: '{:?}'", scene.id);
-            }
-
-            println!("Contains '{}' animations", gltf.animations.len());
-            for anim in gltf.animations.iter()
-            {
-                println!("Animation ID: '{:?}'", anim.id);
-            }
-
+            // Let's output some FACTS!
             println!("Contains '{}' named scenes", gltf.named_scenes.len());
             for scene in gltf.named_scenes.iter()
             {
@@ -120,6 +135,9 @@ fn spawner_system(
             {
                 println!("Animation: '{}'", anim.0);
             }
+
+            commands.entity(entity).remove::<ModelWaitingToSpawn>();
+            commands.entity(entity).insert(ModelSpawned {});
         }
     }
 }
