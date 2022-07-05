@@ -1,5 +1,6 @@
+use crate::anim;
+use anim::*;
 use bevy::{
-    ecs::{component::Component},
     prelude::*,
     gltf::Gltf,
 };
@@ -16,27 +17,9 @@ pub fn start_bevy() {
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
         .add_startup_system(make_instance)
-        .add_system(spawner_system)
         .add_system(anim_trigger_system)
-        .add_system(anim_system)
+        .add_plugin(JayAnimation)
         .run();
-}
-
-#[derive(Component)]
-struct ModelGLTF {
-    handle: Handle<Gltf>,
-}
-
-#[derive(Component)]
-struct ModelWaitingToSpawn {}
-
-#[derive(Component)]
-struct ModelSpawned {}
-
-#[derive(Component)]
-struct ModelGLTFPlayAnimation {
-    anim_clip: Handle<AnimationClip>,
-    anim_loop: bool,
 }
 
 fn make_instance(
@@ -89,56 +72,6 @@ fn anim_trigger_system(
                     });
                 }
             }
-        }
-    }
-}
-
-fn anim_system(
-    mut commands: Commands,
-    q_parent: Query<&ModelGLTFPlayAnimation>,
-    mut q_child: Query<(&Parent, &mut AnimationPlayer)>,
-)
-{
-    for (parent, mut player) in q_child.iter_mut() {
-        if let Ok(play_animation) = q_parent.get(parent.0) {
-            if play_animation.anim_loop {
-                player.play(play_animation.anim_clip.clone_weak())
-                    .repeat();
-            } else {
-                player.play(play_animation.anim_clip.clone_weak());
-            }
-            commands.entity(parent.0).remove::<ModelGLTFPlayAnimation>();
-        }
-    }
-}
-
-fn spawner_system(
-    mut commands: Commands,
-    mut query: Query<(Entity, &ModelGLTF, &ModelWaitingToSpawn)>,
-    assets_gltf: Res<Assets<Gltf>>,
-)
-{
-    for (entity, model, _) in query.iter_mut() {
-        if let Some(gltf) = assets_gltf.get(&model.handle) {
-            // Spawn it!
-            commands.entity(entity).with_children(|parent| {
-                parent.spawn_scene(gltf.scenes[0].clone());
-            });
-
-            // Let's output some FACTS!
-            println!("Contains '{}' named scenes", gltf.named_scenes.len());
-            for scene in gltf.named_scenes.iter()
-            {
-                println!("Scene: '{}'", scene.0);
-            }
-            println!("Contains '{}' named animations", gltf.named_animations.len());
-            for anim in gltf.named_animations.iter()
-            {
-                println!("Animation: '{}'", anim.0);
-            }
-
-            commands.entity(entity).remove::<ModelWaitingToSpawn>();
-            commands.entity(entity).insert(ModelSpawned {});
         }
     }
 }
