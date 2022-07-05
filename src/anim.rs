@@ -32,7 +32,6 @@ pub struct ModelGLTFPlayAnimation {
     pub anim_loop: bool,
 }
 
-
 fn animation_start_system(
     mut commands: Commands,
     q_parent: Query<&ModelGLTFPlayAnimation>,
