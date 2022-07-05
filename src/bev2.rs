@@ -17,8 +17,8 @@ pub fn start_bevy() {
         .add_startup_system(startup)
         .add_startup_system(make_instance)
         .add_system(spawner_system)
+        .add_system(anim_trigger_system)
         .add_system(anim_system)
-        .add_system(gltf_anim_linker)
         .run();
 }
 
@@ -32,6 +32,12 @@ struct ModelWaitingToSpawn {}
 
 #[derive(Component)]
 struct ModelSpawned {}
+
+#[derive(Component)]
+struct ModelGLTFPlayAnimation {
+    anim_clip: Handle<AnimationClip>,
+    anim_loop: bool,
+}
 
 fn make_instance(
     mut commands: Commands,
@@ -57,23 +63,50 @@ fn make_instance(
     ));
 }
 
-#[derive(Component)]
-struct ModelGLTFLinker {}
+// fn gltf_anim_linker(
+//     mut commands: Commands,
+//     q_parent: Query<&ModelGLTF>,
+//     q_child: Query<(Entity, &Parent), Without<ModelGLTFLinker>>,
+// )
+// {
+//     for i in q_child.iter() {
+//         if let (entity, parent) = i {
+//             if let Ok(parent_entity) = q_parent.get(parent.0) {
+//                 commands.entity(entity).insert(ModelGLTFLinker { 
+//                     handle: parent_entity.handle.clone(),
+//                     anim_start:false,
+//                     anim_loop:false,
+//                 });
+//                 println!("Added linker.")
+//             }
+//         }
+//     }
+// }
 
-fn gltf_anim_linker(
+fn anim_trigger_system(
     mut commands: Commands,
+    keyboard_input: Res<Input<KeyCode>>,
+    assets_gltf: Res<Assets<Gltf>>,
     q_parent: Query<&ModelGLTF>,
-    q_child: Query<(Entity, &Parent, Option<&ModelGLTFLinker>, Option<&AnimationPlayer>)>,
+    mut q_child: Query<(&Parent, Entity)>,
 )
 {
-    for i in q_child.iter() {
-        if let (entity, parent, None, anim_player) = i {
-            if let Ok(parent_entity) = q_parent.get(parent.0) {
-                commands.entity(entity).remove::<ModelGLTFLinker>();
-
-                if let None = anim_player
-                {
-                    commands.entity(entity).insert(ModelGLTF { handle: parent_entity.handle.clone() });
+    for (parent, entity) in q_child.iter_mut() {
+        if let Ok(model) = q_parent.get(parent.0) {
+            if let Some(gltf) = assets_gltf.get(&model.handle) {
+                if keyboard_input.just_pressed(KeyCode::Up) {
+                    commands.entity(entity).insert(ModelGLTFPlayAnimation
+                    {
+                        anim_clip: gltf.named_animations["Run"].clone_weak(),
+                        anim_loop: true,
+                    });
+                }
+                if keyboard_input.just_pressed(KeyCode::Down) {
+                    commands.entity(entity).insert(ModelGLTFPlayAnimation
+                    {
+                        anim_clip: gltf.named_animations["Walk"].clone_weak(),
+                        anim_loop: true,
+                    });
                 }
             }
         }
@@ -81,32 +114,20 @@ fn gltf_anim_linker(
 }
 
 fn anim_system(
-    keyboard_input: Res<Input<KeyCode>>,
-    q_parent: Query<&ModelGLTF>,
+    mut commands: Commands,
+    q_parent: Query<&ModelGLTFPlayAnimation>,
     mut q_child: Query<(&Parent, &mut AnimationPlayer)>,
-    assets_gltf: Res<Assets<Gltf>>,
 )
 {
     for (parent, mut player) in q_child.iter_mut() {
-        if let Ok(model) = q_parent.get(parent.0) {
-            if let Some(gltf) = assets_gltf.get(&model.handle) {
-                if keyboard_input.just_pressed(KeyCode::Space) {
-                    if player.is_paused() {
-                        player.play(gltf.named_animations["Run"].clone_weak());
-                        // player.resume();
-                        println!("unpause");
-                    } else {
-                        player.pause();
-                        println!("pause");
-                        println!("Contains '{}' named animations", gltf.named_animations.len());
-                        for anim in gltf.named_animations.iter()
-                        {
-                            println!("Animation: '{}'", anim.0);
-                        }
-                    }
-                }
-                if keyboard_input.just_pressed(KeyCode::Return) {}
+        if let Ok(play_animation) = q_parent.get(parent.0) {
+            if play_animation.anim_loop {
+                player.play(play_animation.anim_clip.clone_weak())
+                    .repeat();
+            } else {
+                player.play(play_animation.anim_clip.clone_weak());
             }
+            commands.entity(parent.0).remove::<ModelGLTFPlayAnimation>();
         }
     }
 }
