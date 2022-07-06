@@ -20,8 +20,7 @@ pub fn start_bevy() {
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
         .add_startup_system(make_instance)
-        .add_system(start_running_system)
-        .add_system(stop_running_system)
+        .add_system(start_anim_system)
         .add_system(ever_building_excitement_system)
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
@@ -62,7 +61,10 @@ fn burn_energy_action_system(
             match *state {
                 ActionState::Requested => {
                     println!("Blargh lets run!");
-                    commands.entity(entity).insert(RunStart {});
+                    commands.entity(entity).insert(StartAnim {
+                        name : String::from("Run"),
+                        loop_plz : true
+                    });
                     *state = ActionState::Executing;
                 }
                 ActionState::Executing => {
@@ -70,7 +72,10 @@ fn burn_energy_action_system(
                     excite.excitement -=
                         burn_off_energy.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
                     if excite.excitement <= burn_off_energy.until {
-                        commands.entity(entity).insert(Stop {});
+                        commands.entity(entity).insert(StartAnim {
+                            name : String::from("Stand Idle"),
+                            loop_plz : true
+                        });
                         *state = ActionState::Success; // Yay we did it.
                     }
                 }
@@ -100,10 +105,10 @@ fn cannot_even_scorer_system(
 }
 
 #[derive(Clone, Component, Debug)]
-struct RunStart {}
-
-#[derive(Clone, Component, Debug)]
-struct Stop {}
+struct StartAnim {
+    name : String,
+    loop_plz : bool,
+}
 
 fn make_instance(
     mut commands: Commands,
@@ -142,44 +147,23 @@ fn make_instance(
     ));
 }
 
-fn start_running_system(
+fn start_anim_system(
     mut commands: Commands,
     assets_gltf: Res<Assets<Gltf>>,
-    q_parent: Query<(&ModelGLTF, &RunStart)>,
+    q_parent: Query<(&ModelGLTF, &StartAnim)>,
     mut q_child: Query<(&Parent, Entity)>,
 )
 {
     for (parent, entity) in q_child.iter_mut() {
-        if let Ok((model, run)) = q_parent.get(parent.0) {
+        if let Ok((model, start_anim)) = q_parent.get(parent.0) {
             if let Some(gltf) = assets_gltf.get(&model.handle) {
                 commands.entity(entity).insert(ModelGLTFPlayAnimation
                 {
-                    anim_clip: gltf.named_animations["Run"].clone_weak(),
-                    anim_loop: true,
+                    anim_clip: gltf.named_animations[&start_anim.name].clone_weak(),
+                    anim_loop: start_anim.loop_plz,
                 });
-                commands.entity(parent.0).remove::<RunStart>();
+                commands.entity(parent.0).remove::<StartAnim>();
                 println!("run");
-            }
-        }
-    }
-}
-fn stop_running_system(
-    mut commands: Commands,
-    assets_gltf: Res<Assets<Gltf>>,
-    q_parent: Query<(&ModelGLTF, &Stop)>,
-    mut q_child: Query<(&Parent, Entity)>,
-)
-{
-    for (parent, entity) in q_child.iter_mut() {
-        if let Ok((model, stop)) = q_parent.get(parent.0) {
-            if let Some(gltf) = assets_gltf.get(&model.handle) {
-                commands.entity(entity).insert(ModelGLTFPlayAnimation
-                {
-                    anim_clip: gltf.named_animations["Stand Idle"].clone_weak(),
-                    anim_loop: true,
-                });
-                commands.entity(parent.0).remove::<Stop>();
-                println!("stop");
             }
         }
     }
