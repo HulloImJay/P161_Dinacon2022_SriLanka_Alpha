@@ -2,7 +2,6 @@ use crate::anim;
 use anim::*;
 use bevy::{
     prelude::*,
-    gltf::Gltf,
 };
 use bevy_editor_pls::prelude::*;
 use big_brain::prelude::*;
@@ -19,8 +18,6 @@ pub fn start_bevy() {
         })
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
-        .add_startup_system(make_instance)
-        .add_system(start_anim_system)
         .add_system(ever_building_excitement_system)
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
@@ -104,17 +101,12 @@ fn cannot_even_scorer_system(
     }
 }
 
-#[derive(Clone, Component, Debug)]
-struct StartAnim {
-    name : String,
-    loop_plz : bool,
-}
-
 fn make_instance(
     mut commands: Commands,
-    ass: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
+    model_filename : &str
 ) {
-    let gltf = ass.load("agouti.glb");
+    let gltf = asset_server.load(model_filename);
     commands.spawn_bundle((
         ModelGLTF {
             handle: gltf,
@@ -130,7 +122,7 @@ fn make_instance(
             rotation: Default::default(),
             scale: Vec3::ONE,
         },
-        Name::new("GLTF Model"),
+        Name::new(format!("GLTF Model {}", model_filename)),
         Excitement {
             excitement: 75.,
             per_second: 2.,
@@ -147,30 +139,9 @@ fn make_instance(
     ));
 }
 
-fn start_anim_system(
-    mut commands: Commands,
-    assets_gltf: Res<Assets<Gltf>>,
-    q_parent: Query<(&ModelGLTF, &StartAnim)>,
-    mut q_child: Query<(&Parent, Entity)>,
-)
-{
-    for (parent, entity) in q_child.iter_mut() {
-        if let Ok((model, start_anim)) = q_parent.get(parent.0) {
-            if let Some(gltf) = assets_gltf.get(&model.handle) {
-                commands.entity(entity).insert(ModelGLTFPlayAnimation
-                {
-                    anim_clip: gltf.named_animations[&start_anim.name].clone_weak(),
-                    anim_loop: start_anim.loop_plz,
-                });
-                commands.entity(parent.0).remove::<StartAnim>();
-                println!("run");
-            }
-        }
-    }
-}
-
 fn startup(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -204,4 +175,6 @@ fn startup(
         },
         ..default()
     });
+
+    make_instance(commands, asset_server, "agouti.glb");
 }
