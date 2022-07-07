@@ -11,7 +11,7 @@ impl Plugin for JayAnimation {
     fn build(&self, app: &mut App) {
         app
             .add_system(start_anim_system_phase_1)
-            .add_system(start_anim_system_phase_2)
+            .add_system(start_anim_system_phase_2.after(start_anim_system_phase_1))
             .add_system(delayed_gltf_spawner_system);
     }
 }
