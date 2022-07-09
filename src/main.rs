@@ -1,7 +1,7 @@
-mod bev3;
+mod bev4;
 mod anim;
 
 fn main() {
-    bev3::start_bevy();
+    bev4::start_bevy();
 }
 

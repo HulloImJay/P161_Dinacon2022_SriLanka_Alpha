@@ -5,6 +5,7 @@ use bevy::{
 };
 use bevy_editor_pls::prelude::*;
 use big_brain::prelude::*;
+use std::f32::consts::PI;
 
 pub fn start_bevy() {
     App::new()
@@ -16,13 +17,78 @@ pub fn start_bevy() {
             color: Color::WHITE,
             brightness: 1.0,
         })
+        .insert_resource(StuffsToObserve::new(100, 100, 1.))
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
         .add_system(ever_building_excitement_system)
+        .add_system(observation_system_update_cells)
+        .add_system(observation_system_update_hashmap.after(observation_system_update_cells))
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
         .run();
 }
+
+#[derive(Component, Debug)]
+struct Observable {
+    pub cell: usize,
+}
+
+// A resource which collects observable thingies by spatial hashing.
+struct StuffsToObserve {
+    stuff: Vec<Vec<Entity>>,
+    cell_size: f32,
+    width: u16,
+    depth: u16,
+}
+
+impl StuffsToObserve {
+    fn new(width: u16, depth: u16, cell_size: f32) -> StuffsToObserve {
+        let mut stuff = Vec::new();
+        let size = width * depth;
+        for _ in 0..size {
+            stuff.push(Vec::new());
+        }
+        StuffsToObserve {
+            stuff,
+            cell_size,
+            width,
+            depth,
+        }
+    }
+}
+
+// Our crude spatial-hash function.
+fn hash_function(pos: Vec3, cell_size: f32, width: u16) -> usize
+{
+    if cell_size <= 0.
+    { return 0; }
+    
+    (f32::floor(pos.x / cell_size) + f32::floor(pos.y / cell_size) * width as f32) as usize
+}
+
+
+fn observation_system_update_cells(
+    stuff_to_observe: Res<StuffsToObserve>,
+    mut observables: Query<(&mut Observable, &Transform)>)
+{
+    for (mut obs, transform) in observables.iter_mut() {
+        obs.cell = hash_function(transform.translation, stuff_to_observe.cell_size, stuff_to_observe.width);
+        println!("cell {}", obs.cell);
+    }
+}
+
+fn observation_system_update_hashmap(
+    mut stuff_to_observe: ResMut<StuffsToObserve>,
+    observables: Query<(&Observable, Entity)>)
+{
+    for (obs, entity) in observables.iter() {
+        if let Some(set) = stuff_to_observe.stuff.get_mut(obs.cell)
+        {
+            set.push(entity);
+        }
+    }
+}
+
 
 // Simple bevy component we'll use to give our critters some state.
 #[derive(Component, Debug)]
@@ -41,6 +107,7 @@ fn ever_building_excitement_system(time: Res<Time>, mut excitements: Query<&mut 
     }
 }
 
+// Represents an action.
 #[derive(Clone, Component, Debug)]
 struct BurnOffEnergy {
     until: f32,
@@ -59,8 +126,8 @@ fn burn_energy_action_system(
                 ActionState::Requested => {
                     println!("Blargh lets run!");
                     commands.entity(entity).insert(StartAnim {
-                        name : String::from("Run"),
-                        loop_plz : true
+                        name: String::from("Fly"),
+                        loop_plz: true,
                     });
                     *state = ActionState::Executing;
                 }
@@ -70,8 +137,8 @@ fn burn_energy_action_system(
                         burn_off_energy.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
                     if excite.excitement <= burn_off_energy.until {
                         commands.entity(entity).insert(StartAnim {
-                            name : String::from("Stand Idle"),
-                            loop_plz : true
+                            name: String::from("TPose"),
+                            loop_plz: true,
                         });
                         *state = ActionState::Success; // Yay we did it.
                     }
@@ -102,9 +169,11 @@ fn cannot_even_scorer_system(
 }
 
 fn make_instance(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    model_filename : &str
+    mut commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    model_filename: &str,
+    position: Vec3,
+    rotation: Quat,
 ) {
     let gltf = asset_server.load(model_filename);
     commands.spawn_bundle((
@@ -113,8 +182,8 @@ fn make_instance(
         },
         ModelWaitingToSpawn {},
         Transform {
-            translation: Default::default(),
-            rotation: Default::default(),
+            translation: position,
+            rotation,
             scale: Vec3::ONE,
         },
         GlobalTransform {
@@ -136,6 +205,7 @@ fn make_instance(
                     per_second: 5.0,
                 },
             ),
+        Observable { cell:0 },
     ));
 }
 
@@ -176,5 +246,17 @@ fn startup(
         ..default()
     });
 
-    make_instance(commands, asset_server, "agouti.glb");
+    make_instance(
+        &mut commands,
+        &asset_server,
+        "house_crow.glb",
+        Vec3::from((0., 10., 0.)),
+        Quat::from_axis_angle(Vec3::Y, PI));
+    
+    make_instance(
+        &mut commands,
+        &asset_server,
+        "house_crow.glb",
+        Vec3::from((20., 10., 0.)),
+        Quat::from_axis_angle(Vec3::Y, PI));
 }
