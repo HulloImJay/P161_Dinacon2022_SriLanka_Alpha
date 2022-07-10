@@ -21,16 +21,17 @@ pub fn start_bevy() {
         .insert_resource(StuffsToObserve::new(100, 100, 100.))
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
-        .add_system(separation_system)
-        .add_system(alignment_system)
-        .add_system(cohesion_system)
+        .add_system(observation_system_update_cells)
+        .add_system(observation_system_update_observed.after(observation_system_update_cells))
+        .add_system(observation_system_update_hashmap.after(observation_system_update_cells))
+        .add_system(separation_system.after(observation_system_update_hashmap))
+        .add_system(alignment_system.after(observation_system_update_hashmap))
+        .add_system(cohesion_system.after(observation_system_update_hashmap))
         .add_system(velocitator_update_system.after(separation_system).after(alignment_system).after(cohesion_system))
         .add_system(velocitator_limit_system.after(velocitator_update_system))
         .add_system(velocitate_system.after(velocitator_limit_system))
         .add_system(orient_to_velocity_system.after(velocitate_system))
         .add_system(ever_building_excitement_system)
-        .add_system(observation_system_update_cells)
-        .add_system(observation_system_update_hashmap.after(observation_system_update_cells))
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
         .run();
@@ -45,26 +46,33 @@ struct Separation {
 fn separation_system(
     mut query_us: Query<(&Transform, &mut Separation, &Observable, Entity)>,
     query_others: Query<&Transform>,
-    stuff_to_observe: Res<StuffsToObserve>,
 ) {
     for (transform, mut separation, observable, entity) in query_us.iter_mut() {
-        separation.separation_factor = Vec3::ZERO;
-        if let Some(nearby_things) = stuff_to_observe.stuff.get(observable.cell)
+        let mut away = Vec3::ZERO;
+        let observed = &observable.observed;
+        let mut count = 0;
+
+        for ent_nearby in observed.into_iter()
         {
-            for thing in nearby_things.into_iter()
+            if *ent_nearby == entity { continue; }
+
+            if let Ok(other_transform) = query_others.get(*ent_nearby)
             {
-                if *thing == entity { continue; }
+                let displacement = other_transform.translation - transform.translation;
 
-                if let Ok(other_transform) = query_others.get(*thing)
+                if displacement.length() < 100.
                 {
-                    let dist = transform.translation - other_transform.translation;
-
-                    if dist.length() < 100.
-                    {
-                        separation.separation_factor += dist;
-                    }
+                    away -= displacement;
+                    count += 1;
                 }
             }
+        }
+        if count > 0
+        {
+            separation.separation_factor = away;
+        } else {
+            separation.separation_factor = Vec3::ZERO;
+            // println!("Nothing found for separation in cell {}.", observable.cell);
         }
     }
 }
@@ -75,32 +83,34 @@ struct Alignment {
 }
 
 fn alignment_system(
-    mut query_us: Query<(&mut Alignment, &Observable, Entity)>,
+    mut query_us: Query<(&mut Alignment, &Observable, &Velocitator, Entity)>,
     query_others: Query<&Velocitator>,
-    stuff_to_observe: Res<StuffsToObserve>,
 )
 {
-    for (mut alignment, observable, entity) in query_us.iter_mut() {
-        alignment.alignment_factor = Vec3::ZERO;
-        if let Some(nearby_things) = stuff_to_observe.stuff.get(observable.cell)
-        {
-            let mut count = 0;
-            for thing in nearby_things.into_iter()
-            {
-                if *thing == entity { continue; }
+    for (mut alignment, observable, velocitator, entity) in query_us.iter_mut() {
+        
+        let mut align_vel = Vec3::ZERO;
+        
+        let observed = &observable.observed;
+        let mut count = 0;
 
-                if let Ok(other_velocitator) = query_others.get(*thing)
-                {
-                    alignment.alignment_factor += other_velocitator.velocity;
-                    count += 1;
-                }
-            }
-            if count > 0
+        for ent_nearby in observed.into_iter()
+        {
+            if *ent_nearby == entity { continue; }
+
+            if let Ok(other_velocitator) = query_others.get(*ent_nearby)
             {
-                alignment.alignment_factor = alignment.alignment_factor / count as f32;
-            } else {
-                println!("Nothing found for alignment in cell {}.", observable.cell);
+                align_vel += other_velocitator.velocity;
+                count += 1;
             }
+        }
+
+        if count > 0
+        {
+            alignment.alignment_factor = align_vel / count as f32 - velocitator.velocity;
+        } else {
+            alignment.alignment_factor = Vec3::ZERO;
+            // println!("Nothing found for alignment in cell {}.", observable.cell);
         }
     }
 }
@@ -113,29 +123,27 @@ struct Cohesion {
 fn cohesion_system(
     mut query_us: Query<(&Transform, &mut Cohesion, &Observable, Entity)>,
     query_others: Query<&Transform>,
-    stuff_to_observe: Res<StuffsToObserve>,
 ) {
     for (transform, mut cohesion, observable, entity) in query_us.iter_mut() {
+        let observed = &observable.observed;
         let mut avg_pos = Vec3::ZERO;
         let mut count = 0;
-        if let Some(nearby_things) = stuff_to_observe.stuff.get(observable.cell)
-        {
-            for thing in nearby_things.into_iter()
-            {
-                if *thing == entity { continue; }
 
-                if let Ok(other_transform) = query_others.get(*thing)
-                {
-                    avg_pos += other_transform.translation - transform.translation;
-                    count += 1;
-                }
+        for ent_nearby in observed.into_iter()
+        {
+            if *ent_nearby == entity { continue; }
+            if let Ok(other_transform) = query_others.get(*ent_nearby)
+            {
+                avg_pos += other_transform.translation;
+                count += 1;
             }
         }
-        if count > 0
-        {
-            cohesion.cohesion_factor = avg_pos / count as f32;
+        if count > 0 {
+            cohesion.cohesion_factor = avg_pos / count as f32 * 0.01 - transform.translation;
         } else {
-            println!("Nothing found for cohesion in cell {}.", observable.cell);
+            // Reset factor.
+            cohesion.cohesion_factor = Vec3::ZERO;
+            // println!("Nothing found for cohesion in cell {}.", observable.cell);
         }
     }
 }
@@ -187,22 +195,21 @@ fn orient_to_velocity_system(
     }
 }
 
-// fn steer_to_target_system 
-
 #[derive(Component, Debug)]
 struct Observable {
     cell: usize,
+    observed: Vec<Entity>,
 }
 
 // A resource which collects observable thingies by spatial hashing.
 struct StuffsToObserve {
     stuff: Vec<Vec<Entity>>,
     cell_size: f32,
-    width: u16,
+    width: usize,
 }
 
 impl StuffsToObserve {
-    fn new(width: u16, depth: u16, cell_size: f32) -> StuffsToObserve {
+    fn new(width: usize, depth: usize, cell_size: f32) -> StuffsToObserve {
         let mut stuff = Vec::new();
         let size = width * depth;
         for _ in 0..size {
@@ -216,8 +223,63 @@ impl StuffsToObserve {
     }
 }
 
+impl StuffsToObserve {
+    fn collect_cells(&self, cell: usize) -> Vec<usize>
+    {
+        let mut all_cells = Vec::new();
+
+        all_cells.push(cell);
+
+        let w = self.width as isize;
+
+        // the eight surrounding cells
+        let cell_r = cell as isize + 1;
+        let cell_l = cell as isize - 1;
+        let cell_u = cell as isize + w;
+        let cell_d = cell as isize - w;
+        let cell_ur = cell as isize + w + 1;
+        let cell_ul = cell as isize + w - 1;
+        let cell_dr = cell as isize - w + 1;
+        let cell_dl = cell as isize - w - 1;
+
+        if ind_valid(&self.stuff, cell_l)
+        { all_cells.push(cell_l as usize); }
+
+        if ind_valid(&self.stuff, cell_r)
+        { all_cells.push(cell_r as usize); }
+
+        if ind_valid(&self.stuff, cell_u)
+        { all_cells.push(cell_u as usize); }
+
+        if ind_valid(&self.stuff, cell_d)
+        { all_cells.push(cell_d as usize); }
+
+        if ind_valid(&self.stuff, cell_ur)
+        { all_cells.push(cell_ur as usize); }
+
+        if ind_valid(&self.stuff, cell_ul)
+        { all_cells.push(cell_ul as usize); }
+
+        if ind_valid(&self.stuff, cell_dr)
+        { all_cells.push(cell_dr as usize); }
+
+        if ind_valid(&self.stuff, cell_dl)
+        { all_cells.push(cell_dl as usize); }
+
+        all_cells
+    }
+}
+
+fn ind_valid<T>(set: &Vec<T>, ind: isize) -> bool
+{
+    if ind < 0 { return false; }
+    if ind >= set.len() as isize { return false; }
+
+    true
+}
+
 // Our crude spatial-hash function.
-fn hash_function(pos: Vec3, cell_size: f32, width: u16) -> usize
+fn hash_function(pos: Vec3, cell_size: f32, width: usize) -> usize
 {
     if cell_size <= 0.
     { return 0; }
@@ -225,14 +287,28 @@ fn hash_function(pos: Vec3, cell_size: f32, width: u16) -> usize
     (f32::floor(pos.x / cell_size) + f32::floor(pos.y / cell_size) * width as f32) as usize
 }
 
-
 fn observation_system_update_cells(
     stuff_to_observe: Res<StuffsToObserve>,
     mut observables: Query<(&mut Observable, &Transform)>)
 {
     for (mut obs, transform) in observables.iter_mut() {
         obs.cell = hash_function(transform.translation, stuff_to_observe.cell_size, stuff_to_observe.width);
-        // println!("cell {}", obs.cell);
+    }
+}
+
+fn observation_system_update_observed(
+    stuff_to_observe: Res<StuffsToObserve>,
+    mut observables: Query<&mut Observable>)
+{
+    for mut obs in observables.iter_mut() {
+        obs.observed.clear();
+        let near_cells = stuff_to_observe.collect_cells(obs.cell);
+        for near_cell in near_cells.iter()
+        {
+            for entity in stuff_to_observe.stuff[*near_cell].iter() {
+                obs.observed.push(*entity);
+            }
+        }
     }
 }
 
@@ -247,11 +323,9 @@ fn observation_system_update_hashmap(
         if let Some(set) = stuff_to_observe.stuff.get_mut(obs.cell)
         {
             set.push(entity);
-            // println!("cell {} now has {} members", obs.cell, set.len());
         }
     }
 }
-
 
 // Simple bevy component we'll use to give our critters some state.
 #[derive(Component, Debug)]
@@ -266,7 +340,6 @@ fn ever_building_excitement_system(time: Res<Time>, mut excitements: Query<&mut 
         if excite.excitement >= 100.0 {
             excite.excitement = 100.0;
         }
-        // println!("Excitement: {}", excite.excitement);
     }
 }
 
@@ -287,7 +360,6 @@ fn burn_energy_action_system(
         if let Ok((mut excite, entity)) = excitements.get_mut(*actor) {
             match *state {
                 ActionState::Requested => {
-                    println!("Blargh lets run!");
                     commands.entity(entity).insert(StartAnim {
                         name: String::from("Fly"),
                         loop_plz: true,
@@ -295,9 +367,6 @@ fn burn_energy_action_system(
                     *state = ActionState::Executing;
                 }
                 ActionState::Executing => {
-                    // println!("running running running");
-
-
                     excite.excitement -=
                         burn_off_energy.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
                     if excite.excitement <= burn_off_energy.until {
@@ -323,7 +392,6 @@ struct CannotEven;
 
 fn cannot_even_scorer_system(
     excitements: Query<&Excitement>,
-    // Same dance with the Actor here, but now we use look up Score instead of ActionState.
     mut query: Query<(&Actor, &mut Score), With<CannotEven>>,
 ) {
     for (Actor(actor), mut score) in query.iter_mut() {
@@ -370,7 +438,10 @@ fn make_instance(
                     per_second: 5.0,
                 },
             ),
-        Observable { cell: 0 },
+        Observable {
+            cell: 0,
+            observed: Vec::new(),
+        },
         Velocitator {
             velocity: Vec3::Z * 20.,
             max_speed: 50.,
@@ -390,7 +461,7 @@ fn startup(
 
     // Camera
     commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(550.0, 80.0, 550.0)
+        transform: Transform::from_xyz(550.0, 280.0, 550.0)
             .looking_at(Vec3::new(200.0, 0.0, 200.0), Vec3::Y),
         ..Default::default()
     });
@@ -419,7 +490,7 @@ fn startup(
     });
 
 
-    let count = 100;
+    let count = 200;
     let max_x = 500;
     let max_z = 500;
     let mut rng = rand::thread_rng();
@@ -427,13 +498,14 @@ fn startup(
     for _ in 0..count
     {
         let x = rng.gen::<f32>() * max_x as f32;
+        let y = rng.gen::<f32>();
         let z = rng.gen::<f32>() * max_z as f32;
 
         make_instance(
             &mut commands,
             &asset_server,
             "house_crow.glb",
-            Vec3::from((x, 15., z)),
+            Vec3::from((x, 15. +y, z)),
             Quat::from_axis_angle(Vec3::Y, PI));
     }
 }
