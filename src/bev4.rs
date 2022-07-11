@@ -1,3 +1,4 @@
+use std::f32::consts::PI;
 use crate::anim;
 use anim::*;
 use bevy::{
@@ -5,7 +6,6 @@ use bevy::{
 };
 use bevy_editor_pls::prelude::*;
 use big_brain::prelude::*;
-use std::f32::consts::PI;
 use rand::prelude::*;
 
 pub fn start_bevy() {
@@ -18,7 +18,7 @@ pub fn start_bevy() {
             color: Color::WHITE,
             brightness: 1.0,
         })
-        .insert_resource(StuffsToObserve::new(100, 100, 100.))
+        .insert_resource(StuffsToObserve::new(25, 25, 20.))
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
         .add_system(observation_system_update_cells)
@@ -31,12 +31,12 @@ pub fn start_bevy() {
         .add_system(velocitator_limit_system.after(velocitator_update_system))
         .add_system(velocitate_system.after(velocitator_limit_system))
         .add_system(orient_to_velocity_system.after(velocitate_system))
+        .add_system(keep_in_bounds_system.after(orient_to_velocity_system))
         .add_system(ever_building_excitement_system)
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
         .run();
 }
-
 
 #[derive(Component, Debug)]
 struct Separation {
@@ -50,8 +50,6 @@ fn separation_system(
     for (transform, mut separation, observable, entity) in query_us.iter_mut() {
         let mut away = Vec3::ZERO;
         let observed = &observable.observed;
-        let mut count = 0;
-
         for ent_nearby in observed.into_iter()
         {
             if *ent_nearby == entity { continue; }
@@ -60,20 +58,14 @@ fn separation_system(
             {
                 let displacement = other_transform.translation - transform.translation;
 
-                if displacement.length() < 100.
+                if displacement.length() < 15.
                 {
                     away -= displacement;
-                    count += 1;
                 }
             }
         }
-        if count > 0
-        {
-            separation.separation_factor = away;
-        } else {
-            separation.separation_factor = Vec3::ZERO;
-            // println!("Nothing found for separation in cell {}.", observable.cell);
-        }
+
+        separation.separation_factor = away;
     }
 }
 
@@ -88,9 +80,8 @@ fn alignment_system(
 )
 {
     for (mut alignment, observable, velocitator, entity) in query_us.iter_mut() {
-        
         let mut align_vel = Vec3::ZERO;
-        
+
         let observed = &observable.observed;
         let mut count = 0;
 
@@ -139,7 +130,7 @@ fn cohesion_system(
             }
         }
         if count > 0 {
-            cohesion.cohesion_factor = avg_pos / count as f32 * 0.01 - transform.translation;
+            cohesion.cohesion_factor = avg_pos / count as f32 - transform.translation;
         } else {
             // Reset factor.
             cohesion.cohesion_factor = Vec3::ZERO;
@@ -159,7 +150,10 @@ fn velocitator_limit_system(
     mut query: Query<&mut Velocitator>,
 ) {
     for mut velocitator in query.iter_mut() {
-        velocitator.velocity = velocitator.velocity.clamp_length_max(velocitator.max_speed);
+        // velocitator.velocity = velocitator.velocity.clamp_length_max(velocitator.max_speed);
+        let spd = velocitator.max_speed;
+        velocitator.velocity = velocitator.velocity.normalize();
+        velocitator.velocity *= spd;
     }
 }
 
@@ -179,9 +173,9 @@ fn velocitator_update_system(
 {
     for (mut velocitator, separation, alignment, cohesion) in query.iter_mut() {
         velocitator.velocity += time.delta().as_secs_f32() *
-            (separation.separation_factor
-                + alignment.alignment_factor
-                + cohesion.cohesion_factor);
+            (separation.separation_factor * 0.4
+                + alignment.alignment_factor * 0.4
+                + cohesion.cohesion_factor * 0.04);
     }
 }
 
@@ -192,6 +186,42 @@ fn orient_to_velocity_system(
     for (mut transform, velocitator) in query.iter_mut() {
         let pos = transform.translation + velocitator.velocity;
         transform.look_at(pos, Vec3::Y);
+    }
+}
+
+fn keep_in_bounds_system(
+    mut query: Query<(&Transform, &mut Velocitator)>,
+)
+{
+    for (transform, mut velocitator) in query.iter_mut() {
+        
+        let turn_factor = 1.;
+        let x_min = 20.;
+        let x_max = 480.;
+        let y_min = 100.;
+        let y_max = 180.;
+        let z_min = 20.;
+        let z_max = 480.;
+
+
+        if transform.translation.x < x_min {
+            velocitator.velocity.x += turn_factor;
+        }
+        if transform.translation.x > x_max {
+            velocitator.velocity.x -= turn_factor
+        }
+        if transform.translation.y < y_min {
+            velocitator.velocity.y += turn_factor;
+        }
+        if transform.translation.y > y_max {
+            velocitator.velocity.y -= turn_factor;
+        }
+        if transform.translation.z < z_min {
+            velocitator.velocity.z += turn_factor;
+        }
+        if transform.translation.z > z_max {
+            velocitator.velocity.z -= turn_factor;
+        }
     }
 }
 
@@ -408,6 +438,8 @@ fn make_instance(
     position: Vec3,
     rotation: Quat,
 ) {
+    let mut rng = rand::thread_rng();
+    
     let gltf = asset_server.load(model_filename);
     commands.spawn_bundle((
         ModelGLTF {
@@ -417,7 +449,7 @@ fn make_instance(
         Transform {
             translation: position,
             rotation,
-            scale: Vec3::ONE,
+            scale: Vec3::ONE * 0.1,
         },
         GlobalTransform {
             translation: Default::default(),
@@ -426,8 +458,8 @@ fn make_instance(
         },
         Name::new(format!("GLTF Model {}", model_filename)),
         Excitement {
-            excitement: 75.,
-            per_second: 2.,
+            excitement: rng.gen::<f32>() * 3. + 75.,
+            per_second: rng.gen::<f32>() * 1. + 2.,
         },
         Thinker::build()
             .picker(FirstToScore { threshold: 0.8 })
@@ -443,7 +475,7 @@ fn make_instance(
             observed: Vec::new(),
         },
         Velocitator {
-            velocity: Vec3::Z * 20.,
+            velocity: rotation * Vec3::Z * 50.,
             max_speed: 50.,
         },
         Separation { separation_factor: Vec3::ZERO },
@@ -461,15 +493,20 @@ fn startup(
 
     // Camera
     commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(550.0, 280.0, 550.0)
-            .looking_at(Vec3::new(200.0, 0.0, 200.0), Vec3::Y),
+        transform: Transform
+        {
+            translation: Vec3::new(250.0, 350.0, 850.0),
+            rotation: Quat::from_rotation_x(-0.15 * PI),  // ::from_axis_angle(Vec3::Y, 2.*PI),
+            scale: Vec3::ONE,
+        },
         ..Default::default()
     });
 
     // Plane
     commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5000000.0 })),
+        mesh: meshes.add(Mesh::from(shape::Plane { size: 500.0 })),
         material: materials.add(Color::rgb(0.4, 0.7, 0.3).into()),
+        transform : Transform::from_xyz(250., 0., 250.),
         ..default()
     });
 
@@ -490,7 +527,7 @@ fn startup(
     });
 
 
-    let count = 200;
+    let count = 400;
     let max_x = 500;
     let max_z = 500;
     let mut rng = rand::thread_rng();
@@ -501,11 +538,13 @@ fn startup(
         let y = rng.gen::<f32>();
         let z = rng.gen::<f32>() * max_z as f32;
 
+        let rot = rng.gen::<f32>() * PI * 4.;
+
         make_instance(
             &mut commands,
             &asset_server,
             "house_crow.glb",
-            Vec3::from((x, 15. +y, z)),
-            Quat::from_axis_angle(Vec3::Y, PI));
+            Vec3::from((x, 25. + y, z)),
+            Quat::from_rotation_y(rot));
     }
 }
