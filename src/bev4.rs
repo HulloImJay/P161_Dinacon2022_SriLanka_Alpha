@@ -1,6 +1,12 @@
 use std::f32::consts::PI;
 use crate::anim;
+use crate::boids;
+use crate::observe;
+use crate::velocitate;
 use anim::*;
+use boids::*;
+use observe::*;
+use velocitate::*;
 use bevy::{
     prelude::*,
 };
@@ -14,6 +20,9 @@ pub fn start_bevy() {
         .add_plugin(EditorPlugin) // bevy_editor_pls, press E!
         .add_plugin(BigBrainPlugin)
         .add_plugin(JayAnimation)
+        .add_plugin(JayObserve)
+        .add_plugin(JayBoids)
+        .add_plugin(JayVelocitate)
         .insert_resource(AmbientLight {
             color: Color::WHITE,
             brightness: 1.0,
@@ -21,341 +30,13 @@ pub fn start_bevy() {
         .insert_resource(StuffsToObserve::new(25, 25, 20.))
         .insert_resource(ClearColor(Color::rgb(1.0, 0.8, 0.2)))
         .add_startup_system(startup)
-        .add_system(observation_system_update_cells)
-        .add_system(observation_system_update_observed.after(observation_system_update_cells))
-        .add_system(observation_system_update_hashmap.after(observation_system_update_cells))
-        .add_system(separation_system.after(observation_system_update_hashmap))
-        .add_system(alignment_system.after(observation_system_update_hashmap))
-        .add_system(cohesion_system.after(observation_system_update_hashmap))
-        .add_system(velocitator_update_system.after(separation_system).after(alignment_system).after(cohesion_system))
-        .add_system(velocitator_limit_system.after(velocitator_update_system))
-        .add_system(velocitate_system.after(velocitator_limit_system))
-        .add_system(orient_to_velocity_system.after(velocitate_system))
-        .add_system(keep_in_bounds_system.after(orient_to_velocity_system))
+        
         .add_system(ever_building_excitement_system)
         .add_system_to_stage(BigBrainStage::Actions, burn_energy_action_system)
         .add_system_to_stage(BigBrainStage::Scorers, cannot_even_scorer_system)
         .run();
 }
 
-#[derive(Component, Debug)]
-struct Separation {
-    separation_factor: Vec3,
-}
-
-fn separation_system(
-    mut query_us: Query<(&Transform, &mut Separation, &Observable, Entity)>,
-    query_others: Query<&Transform>,
-) {
-    for (transform, mut separation, observable, entity) in query_us.iter_mut() {
-        let mut away = Vec3::ZERO;
-        let observed = &observable.observed;
-        for ent_nearby in observed.into_iter()
-        {
-            if *ent_nearby == entity { continue; }
-
-            if let Ok(other_transform) = query_others.get(*ent_nearby)
-            {
-                let displacement = other_transform.translation - transform.translation;
-
-                if displacement.length() < 15.
-                {
-                    away -= displacement;
-                }
-            }
-        }
-
-        separation.separation_factor = away;
-    }
-}
-
-#[derive(Component, Debug)]
-struct Alignment {
-    alignment_factor: Vec3,
-}
-
-fn alignment_system(
-    mut query_us: Query<(&mut Alignment, &Observable, &Velocitator, Entity)>,
-    query_others: Query<&Velocitator>,
-)
-{
-    for (mut alignment, observable, velocitator, entity) in query_us.iter_mut() {
-        let mut align_vel = Vec3::ZERO;
-
-        let observed = &observable.observed;
-        let mut count = 0;
-
-        for ent_nearby in observed.into_iter()
-        {
-            if *ent_nearby == entity { continue; }
-
-            if let Ok(other_velocitator) = query_others.get(*ent_nearby)
-            {
-                align_vel += other_velocitator.velocity;
-                count += 1;
-            }
-        }
-
-        if count > 0
-        {
-            alignment.alignment_factor = align_vel / count as f32 - velocitator.velocity;
-        } else {
-            alignment.alignment_factor = Vec3::ZERO;
-            // println!("Nothing found for alignment in cell {}.", observable.cell);
-        }
-    }
-}
-
-#[derive(Component, Debug)]
-struct Cohesion {
-    cohesion_factor: Vec3,
-}
-
-fn cohesion_system(
-    mut query_us: Query<(&Transform, &mut Cohesion, &Observable, Entity)>,
-    query_others: Query<&Transform>,
-) {
-    for (transform, mut cohesion, observable, entity) in query_us.iter_mut() {
-        let observed = &observable.observed;
-        let mut avg_pos = Vec3::ZERO;
-        let mut count = 0;
-
-        for ent_nearby in observed.into_iter()
-        {
-            if *ent_nearby == entity { continue; }
-            if let Ok(other_transform) = query_others.get(*ent_nearby)
-            {
-                avg_pos += other_transform.translation;
-                count += 1;
-            }
-        }
-        if count > 0 {
-            cohesion.cohesion_factor = avg_pos / count as f32 - transform.translation;
-        } else {
-            // Reset factor.
-            cohesion.cohesion_factor = Vec3::ZERO;
-            // println!("Nothing found for cohesion in cell {}.", observable.cell);
-        }
-    }
-}
-
-
-#[derive(Component, Debug)]
-struct Velocitator {
-    velocity: Vec3,
-    max_speed: f32,
-}
-
-fn velocitator_limit_system(
-    mut query: Query<&mut Velocitator>,
-) {
-    for mut velocitator in query.iter_mut() {
-        // velocitator.velocity = velocitator.velocity.clamp_length_max(velocitator.max_speed);
-        let spd = velocitator.max_speed;
-        velocitator.velocity = velocitator.velocity.normalize();
-        velocitator.velocity *= spd;
-    }
-}
-
-fn velocitate_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Transform, &Velocitator)>,
-) {
-    for (mut transform, velocitator) in query.iter_mut() {
-        transform.translation += velocitator.velocity * time.delta().as_secs_f32();
-    }
-}
-
-fn velocitator_update_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Velocitator, &Separation, &Alignment, &Cohesion)>,
-)
-{
-    for (mut velocitator, separation, alignment, cohesion) in query.iter_mut() {
-        velocitator.velocity += time.delta().as_secs_f32() *
-            (separation.separation_factor * 0.4
-                + alignment.alignment_factor * 0.4
-                + cohesion.cohesion_factor * 0.04);
-    }
-}
-
-fn orient_to_velocity_system(
-    mut query: Query<(&mut Transform, &Velocitator)>,
-)
-{
-    for (mut transform, velocitator) in query.iter_mut() {
-        let pos = transform.translation + velocitator.velocity;
-        transform.look_at(pos, Vec3::Y);
-    }
-}
-
-fn keep_in_bounds_system(
-    mut query: Query<(&Transform, &mut Velocitator)>,
-)
-{
-    for (transform, mut velocitator) in query.iter_mut() {
-        
-        let turn_factor = 1.;
-        let x_min = 20.;
-        let x_max = 480.;
-        let y_min = 100.;
-        let y_max = 180.;
-        let z_min = 20.;
-        let z_max = 480.;
-
-
-        if transform.translation.x < x_min {
-            velocitator.velocity.x += turn_factor;
-        }
-        if transform.translation.x > x_max {
-            velocitator.velocity.x -= turn_factor
-        }
-        if transform.translation.y < y_min {
-            velocitator.velocity.y += turn_factor;
-        }
-        if transform.translation.y > y_max {
-            velocitator.velocity.y -= turn_factor;
-        }
-        if transform.translation.z < z_min {
-            velocitator.velocity.z += turn_factor;
-        }
-        if transform.translation.z > z_max {
-            velocitator.velocity.z -= turn_factor;
-        }
-    }
-}
-
-#[derive(Component, Debug)]
-struct Observable {
-    cell: usize,
-    observed: Vec<Entity>,
-}
-
-// A resource which collects observable thingies by spatial hashing.
-struct StuffsToObserve {
-    stuff: Vec<Vec<Entity>>,
-    cell_size: f32,
-    width: usize,
-}
-
-impl StuffsToObserve {
-    fn new(width: usize, depth: usize, cell_size: f32) -> StuffsToObserve {
-        let mut stuff = Vec::new();
-        let size = width * depth;
-        for _ in 0..size {
-            stuff.push(Vec::new());
-        }
-        StuffsToObserve {
-            stuff,
-            cell_size,
-            width,
-        }
-    }
-}
-
-impl StuffsToObserve {
-    fn collect_cells(&self, cell: usize) -> Vec<usize>
-    {
-        let mut all_cells = Vec::new();
-
-        all_cells.push(cell);
-
-        let w = self.width as isize;
-
-        // the eight surrounding cells
-        let cell_r = cell as isize + 1;
-        let cell_l = cell as isize - 1;
-        let cell_u = cell as isize + w;
-        let cell_d = cell as isize - w;
-        let cell_ur = cell as isize + w + 1;
-        let cell_ul = cell as isize + w - 1;
-        let cell_dr = cell as isize - w + 1;
-        let cell_dl = cell as isize - w - 1;
-
-        if ind_valid(&self.stuff, cell_l)
-        { all_cells.push(cell_l as usize); }
-
-        if ind_valid(&self.stuff, cell_r)
-        { all_cells.push(cell_r as usize); }
-
-        if ind_valid(&self.stuff, cell_u)
-        { all_cells.push(cell_u as usize); }
-
-        if ind_valid(&self.stuff, cell_d)
-        { all_cells.push(cell_d as usize); }
-
-        if ind_valid(&self.stuff, cell_ur)
-        { all_cells.push(cell_ur as usize); }
-
-        if ind_valid(&self.stuff, cell_ul)
-        { all_cells.push(cell_ul as usize); }
-
-        if ind_valid(&self.stuff, cell_dr)
-        { all_cells.push(cell_dr as usize); }
-
-        if ind_valid(&self.stuff, cell_dl)
-        { all_cells.push(cell_dl as usize); }
-
-        all_cells
-    }
-}
-
-fn ind_valid<T>(set: &Vec<T>, ind: isize) -> bool
-{
-    if ind < 0 { return false; }
-    if ind >= set.len() as isize { return false; }
-
-    true
-}
-
-// Our crude spatial-hash function.
-fn hash_function(pos: Vec3, cell_size: f32, width: usize) -> usize
-{
-    if cell_size <= 0.
-    { return 0; }
-
-    (f32::floor(pos.x / cell_size) + f32::floor(pos.y / cell_size) * width as f32) as usize
-}
-
-fn observation_system_update_cells(
-    stuff_to_observe: Res<StuffsToObserve>,
-    mut observables: Query<(&mut Observable, &Transform)>)
-{
-    for (mut obs, transform) in observables.iter_mut() {
-        obs.cell = hash_function(transform.translation, stuff_to_observe.cell_size, stuff_to_observe.width);
-    }
-}
-
-fn observation_system_update_observed(
-    stuff_to_observe: Res<StuffsToObserve>,
-    mut observables: Query<&mut Observable>)
-{
-    for mut obs in observables.iter_mut() {
-        obs.observed.clear();
-        let near_cells = stuff_to_observe.collect_cells(obs.cell);
-        for near_cell in near_cells.iter()
-        {
-            for entity in stuff_to_observe.stuff[*near_cell].iter() {
-                obs.observed.push(*entity);
-            }
-        }
-    }
-}
-
-fn observation_system_update_hashmap(
-    mut stuff_to_observe: ResMut<StuffsToObserve>,
-    observables: Query<(&Observable, Entity)>)
-{
-    for thing in stuff_to_observe.stuff.iter_mut() {
-        thing.clear();
-    }
-    for (obs, entity) in observables.iter() {
-        if let Some(set) = stuff_to_observe.stuff.get_mut(obs.cell)
-        {
-            set.push(entity);
-        }
-    }
-}
 
 // Simple bevy component we'll use to give our critters some state.
 #[derive(Component, Debug)]
@@ -401,7 +82,7 @@ fn burn_energy_action_system(
                         burn_off_energy.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
                     if excite.excitement <= burn_off_energy.until {
                         commands.entity(entity).insert(StartAnim {
-                            name: String::from("TPose"),
+                            name: String::from("Soar"),
                             loop_plz: true,
                         });
                         *state = ActionState::Success; // Yay we did it.
@@ -467,12 +148,11 @@ fn make_instance(
                 CannotEven,
                 BurnOffEnergy {
                     until: 70.0,
-                    per_second: 5.0,
+                    per_second: 10.0,
                 },
             ),
         Observable {
-            cell: 0,
-            observed: Vec::new(),
+            ..Default::default()
         },
         Velocitator {
             velocity: rotation * Vec3::Z * 50.,
@@ -544,7 +224,7 @@ fn startup(
             &mut commands,
             &asset_server,
             "house_crow.glb",
-            Vec3::from((x, 25. + y, z)),
+            Vec3::from((x, 125. + y, z)),
             Quat::from_rotation_y(rot));
     }
 }
