@@ -22,6 +22,7 @@ impl Plugin for JayBoids {
 #[derive(Component, Debug)]
 pub struct Separation {
     pub separation_factor: Vec3,
+    pub weight :f32,
 }
 
 fn separation_system(
@@ -53,6 +54,7 @@ fn separation_system(
 #[derive(Component, Debug)]
 pub struct Alignment {
     pub alignment_factor: Vec3,
+    pub weight :f32,
 }
 
 fn alignment_system(
@@ -90,6 +92,7 @@ fn alignment_system(
 #[derive(Component, Debug)]
 pub struct Cohesion {
     pub cohesion_factor: Vec3,
+    pub weight :f32,
 }
 
 fn cohesion_system(

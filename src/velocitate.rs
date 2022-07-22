@@ -1,9 +1,13 @@
+// Specific to birds flocking and such. Probably shouldn't be.
+
 use bevy::{
     prelude::*,
 };
 
 use crate::boids;
 use boids::*;
+use crate::bounds;
+use bounds::*;
 
 // Our own plugin:
 pub struct JayVelocitate;
@@ -63,42 +67,36 @@ fn orient_to_velocity_system(
 )
 {
     for (mut transform, velocitator) in query.iter_mut() {
-        let pos = transform.translation + velocitator.velocity;
+        let pos = transform.translation - velocitator.velocity;
         transform.look_at(pos, Vec3::Y);
     }
 }
 
 fn keep_in_bounds_system(
     mut query: Query<(&Transform, &mut Velocitator)>,
+    bounds: Res<Bounds>,
 )
 {
     for (transform, mut velocitator) in query.iter_mut() {
-
         let turn_factor = 1.;
-        let x_min = 20.;
-        let x_max = 480.;
-        let y_min = 100.;
-        let y_max = 180.;
-        let z_min = 20.;
-        let z_max = 480.;
 
 
-        if transform.translation.x < x_min {
+        if transform.translation.x < bounds.x_min + bounds.margin {
             velocitator.velocity.x += turn_factor;
         }
-        if transform.translation.x > x_max {
+        if transform.translation.x > bounds.x_max - bounds.margin {
             velocitator.velocity.x -= turn_factor
         }
-        if transform.translation.y < y_min {
+        if transform.translation.y < bounds.y_min + bounds.margin {
             velocitator.velocity.y += turn_factor;
         }
-        if transform.translation.y > y_max {
+        if transform.translation.y > bounds.y_max - bounds.margin {
             velocitator.velocity.y -= turn_factor;
         }
-        if transform.translation.z < z_min {
+        if transform.translation.z < bounds.z_min + bounds.margin {
             velocitator.velocity.z += turn_factor;
         }
-        if transform.translation.z > z_max {
+        if transform.translation.z > bounds.z_max - bounds.margin {
             velocitator.velocity.z -= turn_factor;
         }
     }
