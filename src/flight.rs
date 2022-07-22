@@ -34,10 +34,10 @@ struct FlyerGoal
 fn flyer_update_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut excitements: Query<(&mut Flyer, &Transform, &FlyerProps, &FlyerGoal, Entity)>,
+    mut query: Query<(&mut Flyer, &Transform, &FlyerProps, &FlyerGoal, Entity)>,
 ) {
 
-    for (mut flyer, transform, props, goal) in query.iter_mut() {
+    for (mut flyer, transform, props, goal, entity) in query.iter_mut() {
         
     }
 }
