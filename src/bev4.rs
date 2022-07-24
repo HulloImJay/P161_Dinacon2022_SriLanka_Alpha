@@ -1,14 +1,17 @@
 use std::f32::consts::PI;
 use crate::anim;
-use crate::boids;
-use crate::observe;
-use crate::velocitate;
-use crate::bounds;
 use anim::*;
+use crate::boids;
 use boids::*;
+use crate::observe;
 use observe::*;
+use crate::velocitate;
 use velocitate::*;
+use crate::bounds;
 use bounds::*;
+use crate::flight;
+use flight::*;
+
 use bevy::{
     prelude::*,
 };
@@ -22,6 +25,8 @@ use smooth_bevy_cameras::{
 };
 
 pub fn start_bevy() {
+    
+    // The overall bounds of our simulation.
     let dem_bounds = Bounds::new(
         20.,
         0.,
@@ -40,6 +45,7 @@ pub fn start_bevy() {
         .add_plugin(JayAnimation)
         .add_plugin(JayObserve)
         .add_plugin(JayBoids)
+        .add_plugin(Flight)
         .add_plugin(JayVelocitate)
         .insert_resource(AmbientLight {
             color: Color::WHITE,
